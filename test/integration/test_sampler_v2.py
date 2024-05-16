@@ -472,7 +472,7 @@ class TestSampler(IBMIntegrationTestCase):
         backend = service.backend(self.backend)
         pass_mgr = generate_preset_pass_manager(backend=backend, optimization_level=1)
         sampler = Sampler(backend=backend, options=self._options)
-        result = sampler.run([qc]).result()
+        result = sampler.run([pass_mgr.run(qc)]).result()
         self.assertEqual(len(result), 1)
         self.assertEqual(result[0].data.meas.num_shots, self._shots)
 
