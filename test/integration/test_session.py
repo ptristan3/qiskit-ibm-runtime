@@ -34,15 +34,17 @@ class TestIntegrationSession(IBMIntegrationTestCase):
     @run_integration_test
     def test_estimator_sampler(self, service):
         """Test calling both estimator and sampler."""
-
-        psi1 = RealAmplitudes(num_qubits=2, reps=2)
-        # pylint: disable=invalid-name
-        H1 = SparsePauliOp.from_list([("II", 1), ("IZ", 2), ("XI", 3)])
-        theta1 = [0, 1, 1, 2, 3, 5]
+        backend = service.backend("test_eagle")
+        pm = generate_preset_pass_manager(optimization_level=1, target=backend.target)
 
         options = Options(resilience_level=0)
-        backend = service.backend("ibmq_qasm_simulator")
-        pm = generate_preset_pass_manager(optimization_level=1, target=backend.target)
+        psi1 = RealAmplitudes(num_qubits=2, reps=2)
+        isa_circuit = pm.run(psi1)
+        # pylint: disable=invalid-name
+        H1 = SparsePauliOp.from_list([("II", 1), ("IZ", 2), ("XI", 3)]).apply_layout(
+            isa_circuit.layout
+        )
+        theta1 = [0, 1, 1, 2, 3, 5]
 
         with Session(service, backend=backend) as session:
             estimator = Estimator(session=session, options=options)
@@ -85,10 +87,11 @@ class TestIntegrationSession(IBMIntegrationTestCase):
     def test_using_correct_instance(self, service):
         """Test the instance used when filtering backends is honored."""
         instance = self.dependencies.instance
-        backend = service.backend("ibmq_qasm_simulator", instance=instance)
+        backend = service.backend("test_eagle", instance=instance)
+        pass_mgr = generate_preset_pass_manager(backend=backend, optimization_level=1)
         with Session(service, backend=backend) as session:
             sampler = Sampler(session=session)
-            job = sampler.run(bell(), shots=400)
+            job = sampler.run(pass_mgr.run(bell()), shots=400)
             self.assertEqual(instance, backend._instance)
             self.assertEqual(instance, job.backend()._instance)
 

@@ -34,21 +34,21 @@ class TestIntegrationEstimator(IBMIntegrationTestCase):
 
     def setUp(self) -> None:
         super().setUp()
-        self.backend = "ibmq_qasm_simulator"
+        self.backend = self.dependencies.device
 
     @run_integration_test
     def test_estimator_session(self, service):
         """Verify if estimator primitive returns expected results"""
+        backend = service.backend(self.backend)
+        pass_mgr = generate_preset_pass_manager(optimization_level=1, target=backend.target)
 
-        psi1 = RealAmplitudes(num_qubits=2, reps=2)
-        psi2 = RealAmplitudes(num_qubits=2, reps=3)
+        psi1 = pass_mgr.run(RealAmplitudes(num_qubits=2, reps=2))
+        psi2 = pass_mgr.run(RealAmplitudes(num_qubits=2, reps=3))
 
         # pylint: disable=invalid-name
-        H1 = SparsePauliOp.from_list([("II", 1), ("IZ", 2), ("XI", 3)])
-        H2 = SparsePauliOp.from_list([("IZ", 1)])
-        H3 = SparsePauliOp.from_list([("ZI", 1), ("ZZ", 1)])
-        backend = service.backend(self.backend)
-        pm = generate_preset_pass_manager(optimization_level=1, target=backend.target)
+        H1 = SparsePauliOp.from_list([("II", 1), ("IZ", 2), ("XI", 3)]).apply_layout(psi1.layout)
+        H2 = SparsePauliOp.from_list([("IZ", 1)]).apply_layout(psi2.layout)
+        H3 = SparsePauliOp.from_list([("ZI", 1), ("ZZ", 1)]).apply_layout(psi1.layout)
 
         with Session(service, self.backend) as session:
             estimator = Estimator(session=session)
@@ -58,7 +58,7 @@ class TestIntegrationEstimator(IBMIntegrationTestCase):
             theta2 = [0, 1, 1, 2, 3, 5, 8, 13]
             theta3 = [1, 2, 3, 4, 5, 6]
 
-            circuits1 = pm.run([psi1])
+            circuits1 = [psi1]
             # calculate [ <psi1(theta1)|H1|psi1(theta1)> ]
             job = estimator.run(circuits=circuits1, observables=[H1], parameter_values=[theta1])
             result1 = job.result()
@@ -66,7 +66,7 @@ class TestIntegrationEstimator(IBMIntegrationTestCase):
             self.assertEqual(len(result1.values), len(circuits1))
             self.assertEqual(len(result1.metadata), len(circuits1))
 
-            circuits2 = pm.run(circuits1 * 2)
+            circuits2 = circuits1 * 2
             # calculate [ <psi1(theta1)|H2|psi1(theta1)>, <psi1(theta1)|H3|psi1(theta1)> ]
             job = estimator.run(
                 circuits=circuits2, observables=[H2, H3], parameter_values=[theta1] * 2
@@ -76,7 +76,7 @@ class TestIntegrationEstimator(IBMIntegrationTestCase):
             self.assertEqual(len(result2.values), len(circuits2))
             self.assertEqual(len(result2.metadata), len(circuits2))
 
-            circuits3 = pm.run([psi2])
+            circuits3 = [psi2]
             # calculate [ <psi2(theta2)|H2|psi2(theta2)> ]
             job = estimator.run(circuits=circuits3, observables=[H2], parameter_values=[theta2])
             result3 = job.result()
@@ -95,7 +95,7 @@ class TestIntegrationEstimator(IBMIntegrationTestCase):
             self.assertEqual(len(result4.values), len(circuits2))
             self.assertEqual(len(result4.metadata), len(circuits2))
 
-            circuits5 = pm.run([psi1, psi2, psi1])
+            circuits5 = [psi1, psi2, psi1]
             # calculate [ <psi1(theta1)|H1|psi1(theta1)>,
             #             <psi2(theta2)|H2|psi2(theta2)>,
             #             <psi1(theta3)|H3|psi1(theta3)> ]
@@ -122,13 +122,17 @@ class TestIntegrationEstimator(IBMIntegrationTestCase):
         ws_result = []
         job_ids = set()
 
+        backend = service.backend(self.backend)
         bell_circuit = bell()
-        obs = SparsePauliOp.from_list([("IZ", 1)])
+        pass_mgr = generate_preset_pass_manager(backend=backend, optimization_level=1)
+        isa_circuit = pass_mgr.run(bell_circuit)
+
+        obs = SparsePauliOp.from_list([("IZ", 1)]).apply_layout(isa_circuit.layout)
 
         with Session(service, self.backend) as session:
             estimator = Estimator(session=session)
             job = estimator.run(
-                circuits=[bell_circuit] * 60, observables=[obs] * 60, callback=_callback
+                circuits=[isa_circuit] * 60, observables=[obs] * 60, callback=_callback
             )
             result = job.result()
             self.assertIsInstance(ws_result[-1], dict)
@@ -146,11 +150,19 @@ class TestIntegrationEstimator(IBMIntegrationTestCase):
         cir.cx(0, 1)
         cir.ry(Parameter("theta"), 0)
 
+        backend = service.backend(self.backend)
+        pass_mgr = generate_preset_pass_manager(backend=backend, optimization_level=1)
+        isa_circuit = pass_mgr.run(cir)
+
         theta_vec = np.linspace(-np.pi, np.pi, 15)
 
         ## OBSERVABLE
-        obs1 = SparsePauliOp(["ZZ", "ZX", "XZ", "XX"], [1, -1, +1, 1])
-        obs2 = SparsePauliOp(["ZZ", "ZX", "XZ", "XX"], [1, +1, -1, 1])
+        obs1 = SparsePauliOp(["ZZ", "ZX", "XZ", "XX"], [1, -1, +1, 1]).apply_layout(
+            isa_circuit.layout
+        )
+        obs2 = SparsePauliOp(["ZZ", "ZX", "XZ", "XX"], [1, +1, -1, 1]).apply_layout(
+            isa_circuit.layout
+        )
 
         ## TERRA ESTIMATOR
         estimator = TerraEstimator()
@@ -173,12 +185,12 @@ class TestIntegrationEstimator(IBMIntegrationTestCase):
             estimator = Estimator(session=session)
 
             job1 = estimator.run(
-                circuits=[cir] * len(theta_vec),
+                circuits=[isa_circuit] * len(theta_vec),
                 observables=[obs1] * len(theta_vec),
                 parameter_values=[[v] for v in theta_vec],
             )
             job2 = estimator.run(
-                circuits=[cir] * len(theta_vec),
+                circuits=[isa_circuit] * len(theta_vec),
                 observables=[obs2] * len(theta_vec),
                 parameter_values=[[v] for v in theta_vec],
             )
@@ -196,10 +208,10 @@ class TestIntegrationEstimator(IBMIntegrationTestCase):
         pm = generate_preset_pass_manager(optimization_level=1, target=backend.target)
         circ_count = 3
 
-        psi1 = RealAmplitudes(num_qubits=2, reps=2)
+        psi1 = pm.run(RealAmplitudes(num_qubits=2, reps=2))
 
         # pylint: disable=invalid-name
-        H1 = SparsePauliOp.from_list([("II", 1), ("IZ", 2), ("XI", 3)])
+        H1 = SparsePauliOp.from_list([("II", 1), ("IZ", 2), ("XI", 3)]).apply_layout(psi1.layout)
 
         estimator = Estimator(backend=backend)
         self.assertIsInstance(estimator, BaseEstimator)
@@ -207,17 +219,16 @@ class TestIntegrationEstimator(IBMIntegrationTestCase):
 
         theta = [0, 1, 1, 2, 3, 5]
         circuits = [psi1] * circ_count
-        isa_circuits = pm.run(circuits)
         # calculate [ <psi1(theta1)|H1|psi1(theta1)> ]
         job = estimator.run(
-            circuits=isa_circuits,
+            circuits=circuits,
             observables=[H1] * circ_count,
             parameter_values=[theta] * circ_count,
         )
         result1 = job.result()
         self.assertIsInstance(result1, EstimatorResult)
-        self.assertEqual(len(result1.values), len(isa_circuits))
-        self.assertEqual(len(result1.metadata), len(isa_circuits))
+        self.assertEqual(len(result1.values), len(circuits))
+        self.assertEqual(len(result1.metadata), len(circuits))
         self.assertIsNone(job.session_id)
 
     @run_integration_test

@@ -35,8 +35,11 @@ class TestIntegrationIBMSampler(IBMIntegrationTestCase):
 
     def setUp(self) -> None:
         super().setUp()
-        self.bell = bell()
-        self.backend = "ibmq_qasm_simulator"
+        cir = bell()
+        self.backend = "test_eagle"
+        backend = self.service.backend(self.backend)
+        pass_mgr = generate_preset_pass_manager(backend=backend, optimization_level=1)
+        self.bell = pass_mgr.run(cir)
 
     @run_integration_test
     def test_sampler_non_parameterized_circuits(self, service):
@@ -106,17 +109,20 @@ class TestIntegrationIBMSampler(IBMIntegrationTestCase):
     @run_integration_test
     def test_sampler_skip_transpile(self, service):
         """Test skip transpilation option."""
+        backend = service.backend("test_eagle")
+        pm = generate_preset_pass_manager(optimization_level=1, target=backend.target)
+
         circ = QuantumCircuit(1, 1)
         custom_gate = Gate("my_custom_gate", 1, [3.14, 1])
         circ.append(custom_gate, [0])
         circ.measure(0, 0)
-
+        isa_circ = pm.run(circ)
         with Session(service, self.backend) as session:
             sampler = Sampler(session=session)
             with self.assertRaises(RuntimeJobFailureError) as err:
-                sampler.run(circuits=circ, skip_transpilation=True).result()
+                sampler.run(circuits=isa_circ, skip_transpilation=True).result()
                 # If transpilation not skipped the error would be something about cannot expand.
-                self.assertIn("invalid instructions", err.exception.message)
+                self.assertIn("is not supported by the target system", err.exception.message)
 
     @run_integration_test
     def test_sampler_optimization_level(self, service):

@@ -32,7 +32,7 @@ class TestIntegrationOptions(IBMIntegrationTestCase):
     @run_integration_test
     def test_noise_model(self, service):
         """Test running with noise model."""
-        backend = service.get_backend("ibmq_qasm_simulator")
+        backend = service.get_backend(self.dependencies.device)
         self.log.info("Using backend %s", backend.name)
 
         fake_backend = FakeManila()
@@ -66,29 +66,32 @@ class TestIntegrationOptions(IBMIntegrationTestCase):
             # We should get both 0 and 1 if there is noise.
             self.assertEqual(len(result2.quasi_dists[0].keys()), 2)
             # The results should be the same because we used the same seed.
-            self.assertEqual(result1.quasi_dists, result2.quasi_dists)
+            self.assertAlmostEqual(result1.quasi_dists[0], result2.quasi_dists[0])
 
     @run_integration_test
     def test_simulator_transpile(self, service):
         """Test simulator transpile options."""
-        backend = service.backend("ibmq_qasm_simulator")
+        backend = service.backend(self.dependencies.device)
         self.log.info("Using backend %s", backend.name)
+        pm = generate_preset_pass_manager(optimization_level=1, backend=backend)
 
         circ = QuantumCircuit(2, 2)
         circ.cx(0, 1)
         circ.measure_all(add_bits=False)
-        obs = SparsePauliOp.from_list([("IZ", 1)])
+        isa_circuit = pm.run(circ)
+
+        obs = SparsePauliOp.from_list([("IZ", 1)]).apply_layout(isa_circuit.layout)
 
         option_vars = [
             Options(simulator={"coupling_map": []}),
             Options(simulator={"basis_gates": ["foo"]}),
         ]
 
-        with Session(service=service, backend=backend):
+        with Session(service=self.service, backend=backend):
             for opt in option_vars:
                 with self.subTest(opt=opt):
                     sampler = Sampler(options=opt)
-                    job1 = sampler.run(circ)
+                    job1 = sampler.run(isa_circuit)
                     self.log.info("Runtime job %s submitted.", job1.job_id())
                     with self.assertRaises(RuntimeJobFailureError):
                         job1.result()
@@ -96,7 +99,7 @@ class TestIntegrationOptions(IBMIntegrationTestCase):
                     # self.assertIn("TranspilerError", err.exception.message)
 
                     estimator = Estimator(options=opt)
-                    job2 = estimator.run(circ, observables=obs)
+                    job2 = estimator.run(isa_circuit, observables=obs)
                     with self.assertRaises(RuntimeJobFailureError):
                         job2.result()
                     # TODO: Re-enable when ntc-1651 is fixed
@@ -110,8 +113,8 @@ class TestIntegrationOptions(IBMIntegrationTestCase):
         obs = SparsePauliOp.from_list([("I", 1)])
         options = Options()
         options.resilience_level = 3
-        backend = service.backend("ibmq_qasm_simulator")
-        with Session(service=service, backend=backend) as session:
+        backend = service.backend(self.dependencies.device)
+        with Session(service=self.service, backend=backend) as session:
             with self.assertRaises(ValueError) as exc:
                 inst = Estimator(session=session, options=options)
                 inst.run(circ, observables=obs)
@@ -123,8 +126,8 @@ class TestIntegrationOptions(IBMIntegrationTestCase):
         circ = QuantumCircuit(1)
         obs = SparsePauliOp.from_list([("I", 1)])
         options = Options(resilience_level=2)
-        backend = service.backend("ibmq_qasm_simulator")
-        with Session(service=service, backend=backend) as session:
+        backend = service.backend(self.dependencies.device)
+        with Session(service=self.service, backend=backend) as session:
             inst = Estimator(session=session, options=options)
             job = inst.run(circ, observables=obs)
             self.assertEqual(job.inputs["resilience_settings"]["noise_factors"], [1, 3, 5])
@@ -153,7 +156,7 @@ class TestIntegrationOptions(IBMIntegrationTestCase):
         psi1 = RealAmplitudes(num_qubits=2, reps=2)
         h_1 = SparsePauliOp.from_list([("II", 1), ("IZ", 2), ("XI", 3)])
 
-        backend = service.backend("ibmq_qasm_simulator")
+        backend = service.backend(self.dependencies.device)
         pm = generate_preset_pass_manager(optimization_level=1, target=backend.target)
         options = Options()
         options.simulator.coupling_map = [[0, 1], [1, 0]]

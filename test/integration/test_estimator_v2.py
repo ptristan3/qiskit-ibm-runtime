@@ -31,7 +31,7 @@ class TestEstimatorV2(IBMIntegrationTestCase):
 
     def setUp(self) -> None:
         super().setUp()
-        self.backend = "ibmq_qasm_simulator"
+        self.backend = self.dependencies.device
 
     @run_integration_test
     def test_estimator_v2_session(self, service):

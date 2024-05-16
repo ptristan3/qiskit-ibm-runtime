@@ -17,7 +17,7 @@ from datetime import datetime, timedelta
 import copy
 
 from qiskit.transpiler.target import Target
-from qiskit import QuantumCircuit
+from qiskit import QuantumCircuit, transpile
 from qiskit.providers.exceptions import QiskitBackendNotFoundError
 from qiskit.providers.backend import QubitProperties
 from qiskit_ibm_runtime.exceptions import IBMInputValueError
@@ -246,11 +246,13 @@ class TestIBMBackend(IBMIntegrationTestCase):
 
     def test_sim_backend_options(self):
         """Test simulator backend options."""
-        backend = self.service.backend("ibmq_qasm_simulator")
+        backend = self.backend
         backend.options.shots = 2048
         backend.set_options(memory=True)
         sampler = Sampler(backend=backend)
-        inputs = sampler.run([bell()], shots=1).inputs
+        circuit = bell()
+        isa_circuit = transpile(circuit, backend)
+        inputs = sampler.run([isa_circuit], shots=1).inputs
         self.assertEqual(inputs["pubs"][0][2], 1)
 
     @production_only
