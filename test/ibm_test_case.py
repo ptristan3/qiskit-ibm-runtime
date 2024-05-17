@@ -225,7 +225,13 @@ class IBMIntegrationJobTestCase(IBMIntegrationTestCase):
     @classmethod
     def _find_sim_backends(cls):
         """Find a simulator backend for each service."""
-        cls.sim_backends[cls.service.channel] = cls.service.backends(simulator=True)[0].name
+        sim = cls.service.backends(simulator=True)
+        if sim:
+            cls.sim_backends[cls.service.channel] = sim[0].name
+        else:
+            for backend in cls.service.backends():
+                if "test" in backend.name:
+                    cls.sim_backends[cls.service.channel] = backend.name
 
     def _run_program(
         self,

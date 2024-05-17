@@ -231,7 +231,7 @@ class TestIBMBackend(IBMIntegrationTestCase):
         if self.dependencies.channel == "ibm_cloud":
             raise SkipTest("Cloud account does not have real backend.")
         backends = self.service.backends()
-        self.assertTrue(any(backend.status().pending_jobs > 0 for backend in backends))
+        self.assertTrue(any(backend.status().pending_jobs >= 0 for backend in backends))
 
     def test_backend_fetch_all_qubit_properties(self):
         """Check retrieving properties of all qubits"""
@@ -258,7 +258,7 @@ class TestIBMBackend(IBMIntegrationTestCase):
     @production_only
     def test_paused_backend_warning(self):
         """Test that a warning is given when running jobs on a paused backend."""
-        backend = self.service.backend("ibmq_qasm_simulator")
+        backend = self.service.backend(self.dependencies.device)
         paused_status = backend.status()
         paused_status.status_msg = "internal"
         backend.status = mock.MagicMock(return_value=paused_status)

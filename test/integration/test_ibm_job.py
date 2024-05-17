@@ -35,13 +35,13 @@ class TestIBMJob(IBMIntegrationTestCase):
     def setUp(self):
         """Initial test setup."""
         super().setUp()
-        self.sim_backend = self.dependencies.device
+        self.sim_backend = self.service.backend(self.dependencies.device)
         circuit = bell()
         pm = generate_preset_pass_manager(optimization_level=1, backend=self.sim_backend)
         self.bell = pm.run(circuit)
 
         sampler = Sampler(backend=self.sim_backend)
-        self.sim_job = sampler.run([(self.bell,)])
+        self.sim_job = sampler.run((self.bell,))
         self.last_month = datetime.now() - timedelta(days=30)
 
     def test_run_multiple_simulator(self):
