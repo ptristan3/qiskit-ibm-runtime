@@ -34,13 +34,12 @@ class TestIntegrationEstimator(IBMIntegrationTestCase):
 
     def setUp(self) -> None:
         super().setUp()
-        self.backend = self.dependencies.device
+        self.backend = self.service.get_backend(self.dependencies.device)
 
     @run_integration_test
     def test_estimator_session(self, service):
         """Verify if estimator primitive returns expected results"""
-        backend = service.backend(self.backend)
-        pass_mgr = generate_preset_pass_manager(optimization_level=1, target=backend.target)
+        pass_mgr = generate_preset_pass_manager(optimization_level=1, target=self.backend.target)
 
         psi1 = pass_mgr.run(RealAmplitudes(num_qubits=2, reps=2))
         psi2 = pass_mgr.run(RealAmplitudes(num_qubits=2, reps=3))
@@ -121,14 +120,11 @@ class TestIntegrationEstimator(IBMIntegrationTestCase):
 
         ws_result = []
         job_ids = set()
-
-        backend = service.backend(self.backend)
         bell_circuit = bell()
-        pass_mgr = generate_preset_pass_manager(backend=backend, optimization_level=1)
+        pass_mgr = generate_preset_pass_manager(optimization_level=1, target=self.backend.target)
         isa_circuit = pass_mgr.run(bell_circuit)
 
         obs = SparsePauliOp.from_list([("IZ", 1)]).apply_layout(isa_circuit.layout)
-
         with Session(service, self.backend) as session:
             estimator = Estimator(session=session)
             job = estimator.run(
@@ -150,7 +146,7 @@ class TestIntegrationEstimator(IBMIntegrationTestCase):
         cir.cx(0, 1)
         cir.ry(Parameter("theta"), 0)
 
-        backend = service.backend(self.backend)
+        backend = service.backend(self.dependencies.device)
         pass_mgr = generate_preset_pass_manager(backend=backend, optimization_level=1)
         isa_circuit = pass_mgr.run(cir)
 
@@ -203,7 +199,7 @@ class TestIntegrationEstimator(IBMIntegrationTestCase):
     @run_integration_test
     def test_estimator_no_session(self, service):
         """Test estimator primitive without a session."""
-        backend = service.backend(self.backend)
+        backend = service.backend(self.dependencies.device)
         pm = generate_preset_pass_manager(optimization_level=1, target=backend.target)
         circ_count = 3
 
