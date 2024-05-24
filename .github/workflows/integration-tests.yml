@@ -18,7 +18,10 @@ on:
   workflow_dispatch:
 jobs:
   integration-tests:
-    if: github.repository_owner == 'Qiskit'
+    on:
+      push:
+        branches:
+          - missing-metadata-fake-backends
     name: Run integration tests - ${{ matrix.environment }}
     runs-on: ${{ matrix.os }}
     strategy:
