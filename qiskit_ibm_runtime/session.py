@@ -22,7 +22,7 @@ import warnings
 from qiskit.providers.backend import BackendV1, BackendV2
 
 from qiskit_ibm_runtime import QiskitRuntimeService
-from .exceptions import IBMInputValueError
+from .exceptions import IBMInputValueError, IBMRuntimeError
 from .runtime_job import RuntimeJob
 from .runtime_job_v2 import RuntimeJobV2
 from .utils.result_decoder import ResultDecoder
@@ -39,7 +39,7 @@ def _active_session(func):  # type: ignore
     @wraps(func)
     def _wrapper(self, *args, **kwargs):  # type: ignore
         if not self._active:
-            raise RuntimeError("The session is closed.")
+            raise IBMRuntimeError("The session is closed.")
         return func(self, *args, **kwargs)
 
     return _wrapper
@@ -153,16 +153,11 @@ class Session:
             if not self._backend.configuration().simulator:
                 self._session_id = self._create_session()
 
-        if not self._session_id:
-            warnings.warn(
-                "Session is not supported in local testing mode or when using a simulator."
-            )
-
     def _create_session(self) -> Optional[str]:
         """Create a session."""
         if isinstance(self._service, QiskitRuntimeService):
             session = self._service._api_client.create_session(
-                self.backend(), self._instance, self._max_time, self._service.channel
+                self.backend(), self._instance, self._max_time, self._service.channel, "dedicated"
             )
             return session.get("id")
         return None
@@ -189,6 +184,14 @@ class Session:
         Returns:
             Submitted job.
         """
+        issue_deprecation_msg(
+            msg="session.run is deprecated",
+            version="0.24.0",
+            remedy="session.run will instead be converted into a private method "
+            "since it should not be called directly.",
+            period="3 months",
+            stacklevel=3,
+        )
 
         options = options or {}
 
@@ -219,6 +222,11 @@ class Session:
 
         return job
 
+    @_active_session
+    def _run(self, *args: Any, **kwargs: Any) -> RuntimeJob:
+        """Private run method"""
+        return self.run(*args, **kwargs)
+
     def cancel(self) -> None:
         """Cancel all pending jobs in a session."""
         self._active = False
@@ -247,13 +255,14 @@ class Session:
         """Return current session status.
 
         Returns:
-            The current status of the session, including:
-            Pending: Session is created but not active.
-            It will become active when the next job of this session is dequeued.
-            In progress, accepting new jobs: session is active and accepting new jobs.
-            In progress, not accepting new jobs: session is active and not accepting new jobs.
-            Closed: max_time expired or session was explicitly closed.
-            None: status details are not available.
+            Session status as a string.
+
+            * ``Pending``: Session is created but not active.
+              It will become active when the next job of this session is dequeued.
+            * ``In progress, accepting new jobs``: session is active and accepting new jobs.
+            * ``In progress, not accepting new jobs``: session is active and not accepting new jobs.
+            * ``Closed``: max_time expired or session was explicitly closed.
+            * ``None``: status details are not available.
         """
         details = self.details()
         if details:
@@ -273,23 +282,24 @@ class Session:
         """Return session details.
 
         Returns:
-            A dictionary with the sessions details, including:
-            id: id of the session.
-            backend_name: backend used for the session.
-            interactive_timeout: The maximum idle time (in seconds) between jobs that
-            is allowed to occur before the session is deactivated.
-            max_time: Maximum allowed time (in seconds) for the session, subject to plan limits.
-            active_timeout: The maximum time (in seconds) a session can stay active.
-            state: State of the session - open, active, inactive, or closed.
-            accepting_jobs: Whether or not the session is accepting jobs.
-            last_job_started: Timestamp of when the last job in the session started.
-            last_job_completed: Timestamp of when the last job in the session completed.
-            started_at: Timestamp of when the session was started.
-            closed_at: Timestamp of when the session was closed.
-            activated_at: Timestamp of when the session state was changed to active.
-            mode: Execution mode of the session.
-            usage_time: The usage time, in seconds, of this Session or Batch.
-            Usage is defined as the time a quantum system is committed to complete a job.
+            A dictionary with the sessions details.
+
+            * ``id``: id of the session.
+            * ``backend_name``: backend used for the session.
+            * ``interactive_timeout``: The maximum idle time (in seconds) between jobs that
+              is allowed to occur before the session is deactivated.
+            * ``max_time``: Maximum allowed time (in seconds) for the session, subject to plan limits.
+            * ``active_timeout``: The maximum time (in seconds) a session can stay active.
+            * ``state``: State of the session - open, active, inactive, or closed.
+            * ``accepting_jobs``: Whether or not the session is accepting jobs.
+            * ``last_job_started``: Timestamp of when the last job in the session started.
+            * ``last_job_completed``: Timestamp of when the last job in the session completed.
+            * ``started_at``: Timestamp of when the session was started.
+            * ``closed_at``: Timestamp of when the session was closed.
+            * ``activated_at``: Timestamp of when the session state was changed to active.
+            * ``mode``: Execution mode of the session.
+            * ``usage_time``: The usage time, in seconds, of this Session or Batch.
+              Usage is defined as the time a quantum system is committed to complete a job.
         """
         if self._session_id and isinstance(self._service, QiskitRuntimeService):
             response = self._service._api_client.session_details(self._session_id)

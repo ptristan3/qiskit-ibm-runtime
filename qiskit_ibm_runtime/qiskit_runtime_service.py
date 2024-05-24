@@ -31,6 +31,7 @@ from qiskit.providers.models import (
 
 from qiskit_ibm_runtime import ibm_backend
 from .proxies import ProxyConfiguration
+from .utils.deprecation import issue_deprecation_msg
 from .utils.hgp import to_instance_format, from_instance_format
 from .utils.backend_decoder import configuration_from_server_data
 
@@ -42,16 +43,12 @@ from .api.clients.runtime import RuntimeClient
 from .api.exceptions import RequestsApiError
 from .constants import QISKIT_IBM_RUNTIME_API_URL
 from .exceptions import IBMNotAuthorizedError, IBMInputValueError, IBMAccountError
-from .exceptions import (
-    IBMRuntimeError,
-    RuntimeProgramNotFound,
-    RuntimeJobNotFound,
-)
+from .exceptions import IBMRuntimeError, RuntimeProgramNotFound, RuntimeJobNotFound, IBMApiError
 from .hub_group_project import HubGroupProject  # pylint: disable=cyclic-import
 from .utils.result_decoder import ResultDecoder
 from .runtime_job import RuntimeJob
 from .runtime_job_v2 import RuntimeJobV2
-from .utils import RuntimeDecoder, to_python_identifier
+from .utils import RuntimeDecoder, RuntimeEncoder, to_python_identifier
 from .api.client_parameters import ClientParameters
 from .runtime_options import RuntimeOptions
 from .ibm_backend import IBMBackend
@@ -158,14 +155,17 @@ class QiskitRuntimeService(Provider):
             auth_client = self._authenticate_ibm_quantum_account(self._client_params)
             # Update client parameters to use authenticated values.
             self._client_params.url = auth_client.current_service_urls()["services"]["runtime"]
-            if self._client_params.url == "https://api.de.quantum-computing.ibm.com/runtime":
-                warnings.warn(
-                    "Features in versions of qiskit-ibm-runtime greater than and including "
-                    "0.13.0 may not be supported in this environment"
-                )
             self._client_params.token = auth_client.current_access_token()
             self._api_client = RuntimeClient(self._client_params)
-            self._hgps = self._initialize_hgps(auth_client)
+            try:
+                self._hgps = self._initialize_hgps(auth_client)
+            except json.decoder.JSONDecodeError:
+                raise IBMApiError(
+                    "Unexpected response received from server. "
+                    "Please check if the service is in maintenance mode "
+                    "https://docs.quantum.ibm.com/announcements/service-alerts."
+                )
+
             for hgp in self._hgps.values():
                 for backend_name in hgp.backends:
                     if backend_name not in self._backends:
@@ -775,6 +775,15 @@ class QiskitRuntimeService(Provider):
             QiskitBackendNotFoundError: if no backend could be found.
         """
         # pylint: disable=arguments-differ, line-too-long
+        if not name:
+            warnings.warn(
+                (
+                    "The `name` parameter will be required in a future release no sooner than "
+                    "3 months after the release of qiskit-ibm-runtime 0.24.0 ."
+                ),
+                DeprecationWarning,
+                stacklevel=2,
+            )
         backends = self.backends(name, instance=instance)
         if not backends:
             cloud_msg_url = ""
@@ -829,6 +838,13 @@ class QiskitRuntimeService(Provider):
             RuntimeProgramNotFound: If the program cannot be found.
             IBMRuntimeError: An error occurred running the program.
         """
+        issue_deprecation_msg(
+            msg="service.run is deprecated",
+            version="0.24.0",
+            remedy="service.run will instead be converted into a private method "
+            "since it should not be called directly.",
+            period="3 months",
+        )
         qrt_options: RuntimeOptions = options
         if options is None:
             qrt_options = RuntimeOptions()
@@ -868,9 +884,9 @@ class QiskitRuntimeService(Provider):
                 max_execution_time=qrt_options.max_execution_time,
                 start_session=start_session,
                 session_time=qrt_options.session_time,
-                channel_strategy=None
-                if self._channel_strategy == "default"
-                else self._channel_strategy,
+                channel_strategy=(
+                    None if self._channel_strategy == "default" else self._channel_strategy
+                ),
             )
             if self._channel == "ibm_quantum":
                 messages = response.get("messages")
@@ -916,6 +932,10 @@ class QiskitRuntimeService(Provider):
             )
         return job
 
+    def _run(self, *args: Any, **kwargs: Any) -> Union[RuntimeJob, RuntimeJobV2]:
+        """Private run method"""
+        return self.run(*args, **kwargs)
+
     def job(self, job_id: str) -> Union[RuntimeJob, RuntimeJobV2]:
         """Retrieve a runtime job.
 
@@ -930,7 +950,7 @@ class QiskitRuntimeService(Provider):
             IBMRuntimeError: If the request failed.
         """
         try:
-            response = self._api_client.job_get(job_id, exclude_params=True)
+            response = self._api_client.job_get(job_id, exclude_params=False)
         except RequestsApiError as ex:
             if ex.status_code == 404:
                 raise RuntimeJobNotFound(f"Job not found: {ex.message}") from None
@@ -1080,6 +1100,7 @@ class QiskitRuntimeService(Provider):
                 api=None,
             )
 
+        version = 1
         params = raw_data.get("params", {})
         if isinstance(params, list):
             if len(params) > 0:
@@ -1087,9 +1108,24 @@ class QiskitRuntimeService(Provider):
             else:
                 params = {}
         if not isinstance(params, str):
-            params = json.dumps(params)
+            if params:
+                version = params.get("version", 1)
+            params = json.dumps(params, cls=RuntimeEncoder)
 
         decoded = json.loads(params, cls=RuntimeDecoder)
+        if version == 2:
+            return RuntimeJobV2(
+                backend=backend,
+                api_client=self._api_client,
+                client_params=self._client_params,
+                service=self,
+                job_id=raw_data["id"],
+                program_id=raw_data.get("program", {}).get("id", ""),
+                params=decoded,
+                creation_date=raw_data.get("created", None),
+                session_id=raw_data.get("session_id"),
+                tags=raw_data.get("tags"),
+            )
         return RuntimeJob(
             backend=backend,
             api_client=self._api_client,

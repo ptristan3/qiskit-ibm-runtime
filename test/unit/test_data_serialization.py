@@ -109,12 +109,8 @@ class TestDataSerialization(IBMTestCase):
     def test_coder_operators(self):
         """Test runtime encoder and decoder for operators."""
 
-        coeff_x = Parameter("x")
-        coeff_y = coeff_x + 1
-
         subtests = (
             SparsePauliOp(Pauli("XYZX"), coeffs=[2]),
-            SparsePauliOp(Pauli("XYZX"), coeffs=[coeff_y]),
             SparsePauliOp(Pauli("XYZX"), coeffs=[1 + 2j]),
             Pauli("XYZ"),
         )
@@ -167,6 +163,7 @@ class TestDataSerialization(IBMTestCase):
         """Test encoding and decoding a numpy ndarray."""
         subtests = (
             {"ndarray": np.array([[1, 2, 3], [{"obj": 123}, 5, 6]], dtype=object)},
+            {"ndarray": np.array([1, {"obj": 123}], dtype=object)},
             {"ndarray": np.array([[1, 2, 3], [{"obj": 123}, 5, 6]])},
             {"ndarray": np.array([[1, 2, 3], [4, 5, 6], [7, 8, 9]], dtype=int)},
         )
@@ -346,7 +343,7 @@ class TestContainerSerialization(IBMTestCase):
         data_bin_cls = make_data_bin([("alpha", np.ndarray), ("beta", np.ndarray)], shape=(10, 20))
         alpha = np.empty((10, 20), dtype=np.uint16)
         beta = np.empty((10, 20), dtype=int)
-        my_bin = data_bin_cls(alpha, beta)
+        my_bin = data_bin_cls(alpha=alpha, beta=beta)
         result_bins.append(my_bin)
         return result_bins
 
@@ -403,13 +400,15 @@ class TestContainerSerialization(IBMTestCase):
         """Generates test data for PrimitiveResult test"""
         primitive_results = []
         data_bin_cls = make_data_bin([("alpha", np.ndarray), ("beta", np.ndarray)], shape=(10, 20))
+        empty_data_bin = make_data_bin([], shape=None)
 
         alpha = np.empty((10, 20), dtype=np.uint16)
         beta = np.empty((10, 20), dtype=int)
 
         pub_results = [
-            PubResult(data_bin_cls(alpha, beta)),
-            PubResult(data_bin_cls(alpha, beta)),
+            PubResult(data_bin_cls(alpha=alpha, beta=beta)),
+            PubResult(data_bin_cls(alpha=alpha, beta=beta)),
+            PubResult(empty_data_bin()),
         ]
         result = PrimitiveResult(pub_results, {"1": 2})
         primitive_results.append(result)
